@@ -1,0 +1,13 @@
+
+*.exe
+*.exe
+*.pdb
+*.txt
+*.cache
+*.pdb
+bin/Debug/SerialportSample.exe
+bin/Debug/SerialportSample.pdb
+obj/x86/Debug/SerialportSample.csproj.FileListAbsolute.txt
+obj/x86/Debug/SerialportSample.csproj.GenerateResource.cache
+obj/x86/Debug/SerialportSample.exe
+obj/x86/Debug/SerialportSample.pdb
