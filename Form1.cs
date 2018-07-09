@@ -16,6 +16,11 @@ namespace SerialportSample
         private SerialPort comm = new SerialPort();
         private StringBuilder builder = new StringBuilder();//避免在事件处理方法中反复的创建，定义到外面。
         private long received_count = 0;//接收计数
+
+        // LiuJiaJun - 增加一个变量进行单组数据是否接收完全的判断
+        private StringBuilder builder_data = new StringBuilder();
+        private long batch_received_count = 0;
+
         private long send_count = 0;//发送计数
 
         private delegate void DelegateCallBackData(string data);
@@ -30,6 +35,9 @@ namespace SerialportSample
         //窗体初始化
         private void Form1_Load(object sender, EventArgs e)
         {
+            // Liu - builder 清空，保险起见
+            builder_data.Clear();
+
             string str = "0xEE";
             string str1 = "0x16";
             int i = Convert.ToInt32(str, 16);
@@ -66,9 +74,7 @@ namespace SerialportSample
 
         private void ReceivedData(string data)
         {
-            //string[] DATA;
-           // DATA = data.Split(new string[] { "," }, StringSplitOptions.RemoveEmptyEntries);
-            //string data1 = DATA[0].Replace("","");
+            /*
             string[] sArray;
             //接收数据是否存在01 03 02,,,,,,,,,,,,,,,,,,,,,,010300000001840A
             if (data.Contains("01 03 02"))
@@ -100,6 +106,41 @@ namespace SerialportSample
                     SetChartData(dHigh);
                 }
             }
+            */
+            //================DengYan 代码==========================
+            //================Liu 代码=========================
+            //Step 1. 判断前三个是否为固定开头数据
+            byte[] batchdata = System.Text.Encoding.Default.GetBytes(data);
+            if (batchdata[0] != 0x01)
+            {
+                // 报错-进入纠错机制
+                SetChartData(-100.0);
+                return;
+            }
+            if (batchdata[1] != 0x03)
+            {
+                // 报错-进入纠错机制
+                SetChartData(-100.0);
+                return;
+            }
+            if (batchdata[2] != 0x02)
+            {
+                // 报错-进入纠错机制
+                SetChartData(-100.0);
+                return;
+            }
+
+            // 文件头检验通过-解析数据
+            UInt32 laser_data;
+            laser_data = batchdata[3];
+            laser_data = laser_data << 8;
+            laser_data = laser_data + batchdata[4];
+
+            // 毫安值：
+            double dmA = (laser_data * 20.0) / 10000.0;
+            // 高度：
+            double dHeight = 600 - dmA * 50;
+            SetChartData(dHeight);
 
         }
         private int nRow = 1;
@@ -132,11 +173,37 @@ namespace SerialportSample
             byte[] buf = new byte[n];//声明一个临时数组存储当前来的串口数据
             received_count += n;//增加接收计数
             comm.Read(buf, 0, n);//读取缓冲数据
+
+            // Liu-计数判断是否收够了一组
+            batch_received_count += n;
+            // Liu-判断是否够 7 bytes （目前激光测距仪肯定是7bytes，如果作为其它多路信号接收，不能这么一概而论）
+            if (batch_received_count < 7)
+            {
+                foreach (byte b in buf)
+                {
+                    builder_data.Append(b); // 直接放进来
+                }
+            }
+            else if (batch_received_count == 7)
+            {
+                foreach (byte b in buf)
+                {
+                    builder_data.Append(b); // 直接放进来
+                }
+                // 可以进行解析
+                delegateData(builder_data.ToString());
+                batch_received_count = 0;
+                delegateData(builder_data.ToString());
+                builder_data.Clear();
+            }
+
+            
+
             builder.Clear();//清除字符串构造器的内容
             //因为要访问ui资源，所以需要使用invoke方式同步ui。
             this.Invoke((EventHandler)(delegate
             {
-                //判断是否是显示为16禁止
+                //判断是否是显示为16进制
                 if (checkBoxHexView.Checked)
                 {
                     //依次的拼接出16进制字符串
@@ -151,7 +218,7 @@ namespace SerialportSample
                     builder.Append(Encoding.ASCII.GetString(buf));
                 }
 
-                delegateData(builder.ToString());
+                
                 //追加的形式添加到文本框末端，并滚动到最后。
                 this.txGet.AppendText(builder.ToString());
                 //修改接收计数
