@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using System.IO;
 using System.IO.Ports;
 using System.Text.RegularExpressions;
 
@@ -17,7 +18,7 @@ namespace SerialportSample
         private StringBuilder builder = new StringBuilder();//避免在事件处理方法中反复的创建，定义到外面。
         private long received_count = 0;//接收计数
     
-        // LiuJiaJun
+        //------------------------------- LiuJiaJun ------------------------------------------------
         // private StringBuilder builder_data = new StringBuilder(); // 弃用这种类型的，不适合做接收变量
         private byte[] laser_data = new byte[16];
         private byte[] recv_buff = new byte[64];
@@ -32,8 +33,26 @@ namespace SerialportSample
         // 关于定时器2
         private double dmA = 0;
         private double dHeight = 0;
-        
 
+        // 实际数据采集流程
+        // 0. 定义低点
+        private double thresh_low = 300;
+        private double thresh_high = 350;
+
+        // 1. 连续三点
+        private int continue3high = 0;
+        private int continue3low = 0;
+        // 2. 数据缓冲区
+        private double[] height_data = new double[512];
+        private int height_data_num = 0;
+        // 3. 数据采集开始标志位
+        private bool Sample_Start = false;
+        // 4. 刀片数量编号，用来命名数据文件
+        private int Knife_num = 0;
+       
+
+
+        //------------------------------------------------------------------------------------------
         private long send_count = 0;//发送计数
 
         private delegate void DelegateCallBackData(byte[] data);
@@ -48,7 +67,7 @@ namespace SerialportSample
         //窗体初始化
         private void Form1_Load(object sender, EventArgs e)
         {
-            // Liu - builder 清空，保险起见
+            // Liu - 清空，保险起见
             Array.Clear(laser_data, 0, laser_data.Length);
 
             string str = "0xEE";
@@ -83,7 +102,7 @@ namespace SerialportSample
             //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - batch_received_count is {0}", batch_received_count);
             if (batch_received_count == 7)
             {
-                this.timer1.Stop();
+                //this.timer1.Stop();
                 //System.Diagnostics.Debug.WriteLine("========================================");
                 //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 0 is {0}", recv_buff[0]);
                 //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 1 is {0}", recv_buff[1]);
@@ -93,11 +112,11 @@ namespace SerialportSample
                 //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 5 is {0}", recv_buff[5]);
                 //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 6 is {0}", recv_buff[6]);
                 ReceivedData(laser_data);
-                batch_received_count = 0;
-                laser_data_index = 0;
+                //batch_received_count = 0;
+                //laser_data_index = 0;
                 
-                comm.Write(laser_send_chars, 0, 8);
-                this.timer1.Start();
+                //comm.Write(laser_send_chars, 0, 8);
+                //this.timer1.Start();
             }
 
             else if (recv_OK == false)
@@ -132,7 +151,7 @@ namespace SerialportSample
 
         private void ReceivedData(byte[] data)
         {
-
+            this.timer1.Stop();
             //================Liu 代码=========================
             //Step 1. 判断前三个是否为固定开头数据
             // byte[] batchdata = System.Text.Encoding.Default.GetBytes(data);
@@ -175,7 +194,63 @@ namespace SerialportSample
             // 所以，x = 4 对应 y = 450; x = 16 对应 y = 160
 
             dHeight = (dmA - 4.0) * (160.0 - 450.0) / 12.0 + 450.0;
-            SetChartData(dHeight);
+
+            // - 设置记录机制 -
+            
+            if (false == Sample_Start) // 如果采样没有开始
+            {
+                if (dHeight < thresh_low) // 进入连续接近三点的判断
+                {
+                    height_data[continue3low++] = dHeight;
+                    if (continue3low == 3)
+                    {
+                        height_data_num = 3;
+                        continue3low = 0;
+                        Sample_Start = true;
+                    }
+                }
+                else
+                    continue3low = 0;
+            }
+            else // 采样开始
+            {
+                if (height_data_num < 512)
+                    height_data[height_data_num++] = dHeight;
+                else
+                    height_data_num = 1000;
+
+                if (dHeight > thresh_high) // 进入连续远离三点的判断
+                {
+                    continue3high++;
+                    if (continue3high == 3)
+                    {
+                        if (height_data_num != 1000)
+                            height_data_num = height_data_num - 3;
+                        continue3high = 0;
+                        // 保存数据到文件，注意，这时要停掉定时器，但是目前定时器操作部分有一些在函数外部，
+                        // 所以这项工作留待后续统一做
+                        StreamWriter sw = new StreamWriter("knife" + Knife_num, false);
+                        for (int i=0; i<height_data_num; i++)
+                        {
+                            sw.WriteLine("{0}", height_data[i]);
+                        }
+                        Knife_num++;
+                        sw.Flush();
+                        sw.Close();
+
+                        // 停止采样
+                        Sample_Start = false;
+                    }
+                }
+                else
+                    continue3high = 0;
+            }
+
+            batch_received_count = 0;
+            laser_data_index = 0;
+            comm.Write(laser_send_chars, 0, 8);
+            this.timer1.Start();
+            // SetChartData(dHeight);
 
         }
         private int nRow = 1;
@@ -274,6 +349,7 @@ namespace SerialportSample
         private void buttonSend_Click(object sender, EventArgs e)
         {
             //正式代码
+            
             if (timer_ON)
             {
                 timer_ON = false;
@@ -285,6 +361,7 @@ namespace SerialportSample
                 this.timer1.Start();
                 timer_ON = true;
             }
+            
 
             //调试代码
             /*
@@ -307,6 +384,17 @@ namespace SerialportSample
             }
             */
 
+            // 临时测试文件命名&写入
+            /*
+            int temp_num = 168;
+            StreamWriter sw = new StreamWriter("knife" + temp_num, false);
+            for (int i = 0; i < 5; i++)
+            {
+                sw.WriteLine("{0}", height_data[i]);
+            }
+            sw.Flush();
+            sw.Close();
+            */
         }
 
         private void buttonReset_Click(object sender, EventArgs e)
