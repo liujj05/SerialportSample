@@ -11,25 +11,28 @@ using System.Text.RegularExpressions;
 
 namespace SerialportSample
 {
-    
     public partial class SerialportSampleForm : Form
     {
         private SerialPort comm = new SerialPort();
         private StringBuilder builder = new StringBuilder();//避免在事件处理方法中反复的创建，定义到外面。
         private long received_count = 0;//接收计数
-
-        // LiuJiaJun - 增加一个变量进行单组数据是否接收完全的判断
+    
+        // LiuJiaJun
         // private StringBuilder builder_data = new StringBuilder(); // 弃用这种类型的，不适合做接收变量
         private byte[] laser_data = new byte[16];
+        private byte[] recv_buff = new byte[64];
         private int laser_data_index = 0;
         private long batch_received_count = 0;
         // 发送与接收的互斥
         private bool recv_over = true;
         private bool recv_OK = true;
-        // 关于定时器
+        // 关于定时器1
         private bool timer_ON = false;
         private byte[] laser_send_chars = { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0A };
-
+        // 关于定时器2
+        private double dmA = 0;
+        private double dHeight = 0;
+        
 
         private long send_count = 0;//发送计数
 
@@ -41,9 +44,6 @@ namespace SerialportSample
         {
             InitializeComponent();
         }
-
-
-
 
         //窗体初始化
         private void Form1_Load(object sender, EventArgs e)
@@ -75,18 +75,46 @@ namespace SerialportSample
         }
 
 
-        // 添加定时器
+        // 添加定时器1
         private void timer1_Tick(object sender, EventArgs e)
         {
-            if (timer_ON & recv_OK)
+            // 添加数据处理、解析部分
+            //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - laser_data_index is {0}", laser_data_index);
+            //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - batch_received_count is {0}", batch_received_count);
+            if (batch_received_count == 7)
             {
-                if (recv_over)
-                {
-                    recv_over = false;
-                    comm.Write(laser_send_chars, 0, 8);
-                }
+                this.timer1.Stop();
+                //System.Diagnostics.Debug.WriteLine("========================================");
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 0 is {0}", recv_buff[0]);
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 1 is {0}", recv_buff[1]);
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 2 is {0}", recv_buff[2]);
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 3 is {0}", recv_buff[3]);
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 4 is {0}", recv_buff[4]);
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 5 is {0}", recv_buff[5]);
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### Timer1 - Recv_buff 6 is {0}", recv_buff[6]);
+                ReceivedData(laser_data);
+                batch_received_count = 0;
+                laser_data_index = 0;
+                
+                comm.Write(laser_send_chars, 0, 8);
+                this.timer1.Start();
             }
 
+            else if (recv_OK == false)
+            {
+                System.Diagnostics.Debug.WriteLine("Timer1 -- receive not OK!");
+                timer_ON = false;
+            }
+        }
+
+
+        // 添加定时器2
+        private void timer2_Tick(object sender, EventArgs e)
+        {
+            if (timer_ON)
+            {
+                // SetChartData(dmA);
+            }
         }
 
 
@@ -104,61 +132,33 @@ namespace SerialportSample
 
         private void ReceivedData(byte[] data)
         {
-            /*
-            string[] sArray;
-            //接收数据是否存在01 03 02,,,,,,,,,,,,,,,,,,,,,,010300000001840A
-            if (data.Contains("01 03 02"))
-            {
-                //得到01 03 02以外字串
-                sArray = data.Split(new string[] { "01 03 02" }, StringSplitOptions.RemoveEmptyEntries);
-                //如果获取字串数据大于0 说明得到01 03 02以外字串成功
-                if (sArray.Length > 0)
-                {
-                    //截取4位有效字串，因为接收数据两位之间包含一个空格，因此设置6
-                    if (sArray[0].Length > 6)
-                    sArray[0] = sArray[0].Remove(6);
-                    //去掉字串中的空格
-                    string temp = sArray[0].Replace(" ","");
-                    
-                    double nValue = 0;
-                    //数据解析
-                    for (int i = 0; i < temp.Length; i++)
-                    {
-                        string a = temp[i].ToString();
-                        int nTemp = Convert.ToInt32(a,16);
-                        nValue += nTemp * Math.Pow(16, temp.Length - i -1);
-                    }
-                    //毫安算法
-                    double dMA = (nValue * 20) / 10000;
-                    //高度算法
-                    double dHigh = 18.0645 * dMA - 220.1225;
 
-                    SetChartData(dHigh);
-                }
-            }
-            */
-            //================DengYan 代码==========================
             //================Liu 代码=========================
             //Step 1. 判断前三个是否为固定开头数据
             // byte[] batchdata = System.Text.Encoding.Default.GetBytes(data);
             if (data[0] != 0x01)
             {
                 // 报错-进入纠错机制
-                SetChartData(-100.0);
+                //SetChartData(-100.0);
+                System.Diagnostics.Debug.WriteLine("###DEBUG### Data X");
                 return;
             }
             if (data[1] != 0x03)
             {
                 // 报错-进入纠错机制
-                SetChartData(-100.0);
+                //SetChartData(-100.0);
+                System.Diagnostics.Debug.WriteLine("###DEBUG### Data X");
                 return;
             }
             if (data[2] != 0x02)
             {
                 // 报错-进入纠错机制
-                SetChartData(-100.0);
+                //SetChartData(-100.0);
+                System.Diagnostics.Debug.WriteLine("###DEBUG### Data X");
                 return;
             }
+
+            //System.Diagnostics.Debug.WriteLine("###DEBUG### Data OK");
 
             // 文件头检验通过-解析数据
             UInt32 laser_data;
@@ -167,10 +167,15 @@ namespace SerialportSample
             laser_data = laser_data + data[4];
 
             // 毫安值：
-            double dmA = (laser_data * 20.0) / 10000.0;
+            dmA = (laser_data * 20.0) / 10000.0;
             // 高度：
-            double dHeight = 600 - dmA * 50;
-            SetChartData(dmA);
+            // IL 300 比较特殊
+            // 0 位置在300，远离最多到450，靠近可以到160
+            // 整个这一段均匀分布在4-16mA
+            // 所以，x = 4 对应 y = 450; x = 16 对应 y = 160
+
+            dHeight = (dmA - 4.0) * (160.0 - 450.0) / 12.0 + 450.0;
+            SetChartData(dHeight);
 
         }
         private int nRow = 1;
@@ -199,79 +204,37 @@ namespace SerialportSample
 
         void comm_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
-            recv_over = false;
+            
 
 
             int n = comm.BytesToRead;//先记录下来，避免某种原因，人为的原因，操作几次之间时间长，缓存不一致
-            byte[] buf = new byte[n];//声明一个临时数组存储当前来的串口数据
+         
             received_count += n;//增加接收计数
-            comm.Read(buf, 0, n);//读取缓冲数据
+            comm.Read(recv_buff, 0, n);//读取缓冲数据
 
-            // Liu-计数判断是否收够了一组
+
+            // Liu - Plan B 无脑收，只管是不是该清空了
             batch_received_count += n;
-            // Liu-判断是否够 7 bytes （目前激光测距仪肯定是7bytes，如果作为其它多路信号接收，不能这么一概而论）
-            if (batch_received_count < 7)
+            for (int i=0; i<n; i++)
             {
-                foreach (byte b in buf)
-                {
-                    laser_data[laser_data_index++] = b;
-                }
+                //System.Diagnostics.Debug.WriteLine("###DEBUG### laser_data_index is {0}", laser_data_index);
                 
-            }
-            else if (batch_received_count == 7)
-            {
-                foreach (byte b in buf)
-                {
-                    laser_data[laser_data_index++] = b;
-                }
-                // 可以进行解析
-                delegateData(laser_data);
-                batch_received_count = 0;
-                Array.Clear(laser_data, 0, laser_data.Length);
-                laser_data_index = 0;
-                recv_over = true;
-            }
-            else
-            {
-                // 报错退出
-                batch_received_count = 0;
-                Array.Clear(laser_data, 0, laser_data.Length);
-                laser_data_index = 0;
-                recv_OK = false;
-                return;
-            }
-
-            
-
-            builder.Clear();//清除字符串构造器的内容
-            //因为要访问ui资源，所以需要使用invoke方式同步ui。
-            this.Invoke((EventHandler)(delegate
-            {
-                //判断是否是显示为16进制
-                if (checkBoxHexView.Checked)
-                {
-                    //依次的拼接出16进制字符串
-                    foreach (byte b in buf)
-                    {
-                        builder.Append(b.ToString("X2") + " ");
-                    }
-                }
-                else
-                {
-                    //直接按ASCII规则转换成字符串
-                    builder.Append(Encoding.ASCII.GetString(buf));
-                }
-
                 
-                //追加的形式添加到文本框末端，并滚动到最后。
-                this.txGet.AppendText(builder.ToString());
-                //修改接收计数
-                labelGetCount.Text = "Get:" + received_count.ToString();
-            }));
+                laser_data[laser_data_index++] = recv_buff[i];
 
-            
+            }
+
+            // 测试代码
+            /*
+            System.Diagnostics.Debug.WriteLine("###DEBUG### - comm_DataReceived");
+            System.Diagnostics.Debug.WriteLine("###DEBUG### - comm_DataReceived recv_num is {0}", n);
+            for (int i=0; i<7; i++)
+            {
+                System.Diagnostics.Debug.WriteLine("###DEBUG### - comm_DataReceived {0} is {1}", i, recv_buff[i]);
+            }
+            */
         }
-       
+
         private void buttonOpenClose_Click(object sender, EventArgs e)
         {
             //根据当前串口对象，来判断操作
@@ -310,62 +273,40 @@ namespace SerialportSample
 
         private void buttonSend_Click(object sender, EventArgs e)
         {
-            //============================DengYan Code=============================================
-            ////定义一个变量，记录发送了几个字节
-            //int n = 0;
-            ////16进制发送,,,010300000001840A
-            //if (checkBoxHexSend.Checked)
-            //{
-            //    //我们不管规则了。如果写错了一些，我们允许的，只用正则得到有效的十六进制数
-            //    MatchCollection mc = Regex.Matches(txSend.Text, @"(?i)[\da-f]{2}");
-            //    List<byte> buf = new List<byte>();//填充到这个临时列表中
-            //    //依次添加到列表中
-            //    foreach (Match m in mc)
-            //    {
-            //        buf.Add(byte.Parse(m.Value,System.Globalization.NumberStyles.HexNumber));
-            //    }
-            //    //转换列表为数组后发送
-            //    comm.Write(buf.ToArray(), 0, buf.Count);
-            //    //记录发送的字节数
-            //    n = buf.Count;
-            //}
-            //else//ascii编码直接发送
-            //{
-            //    //包含换行符
-            //    if (checkBoxNewlineSend.Checked)
-            //    {
-            //        comm.WriteLine(txSend.Text);
-            //        n = txSend.Text.Length + 2;
-            //    }
-            //    else//不包含换行符
-            //    {
-            //        comm.Write(txSend.Text);
-            //        n = txSend.Text.Length;
-            //    }
-            //}
-            //send_count += n;//累加发送字节数
-            //labelSendCount.Text = "Send:" + send_count.ToString();//更新界面
-            //===========================DengYan Code=================================================
-
-            //===========================Liu Code==========================================
-            //byte[] my_send_code = new byte[16];
-            //my_send_code[0] =0x01;
-            //my_send_code[1] =0x03;
-            //my_send_code[2] =0x00;
-            //my_send_code[3] =0x00;
-            //my_send_code[4] =0x00;
-            //my_send_code[5] =0x01;
-            //my_send_code[6] =0x84;
-            //my_send_code[7] =0x0A;
-            //while (recv_OK)
-            //{
-            //    if (recv_over)
-            //        comm.Write(my_send_code, 0, 8);
-            //}
+            //正式代码
             if (timer_ON)
+            {
                 timer_ON = false;
+                this.timer1.Stop();
+            }
             else
+            {
+                comm.Write(laser_send_chars, 0, 8);
+                this.timer1.Start();
                 timer_ON = true;
+            }
+
+            //调试代码
+            /*
+            if (timer_ON == false)
+            {
+                comm.Write(laser_send_chars, 0, 8);
+                timer_ON = true;
+            }
+            else
+            {
+                if (batch_received_count == 7)
+                {
+                    batch_received_count = 0;
+                    laser_data_index = 0;
+                    System.Diagnostics.Debug.WriteLine("========================================");
+                    for (int i = 0; i < 16; i++)
+                        System.Diagnostics.Debug.WriteLine("###DEBUG### - laser_data is {1} is {0}", laser_data[i],i);
+                }
+                timer_ON = false;
+            }
+            */
+
         }
 
         private void buttonReset_Click(object sender, EventArgs e)
